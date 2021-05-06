@@ -82,7 +82,11 @@ std::ostream& operator<<(std::ostream& os, const Token& rhs) {
 namespace detail_lexer {
 
 Token LexerTokenCreator::NextToken(std::istream& input) {
-    if (IsEof(input)) {
+    if (is_end_of_file_ || IsEof(input)) {
+        is_end_of_file_ = true;
+        if (indent_counter_ > 0) {
+            return CreateIndent(0);
+        }
         return CreateEof(input);
     }
 
@@ -135,7 +139,7 @@ Token LexerTokenCreator::SkipEmptyLinesAndCreateIndent(std::istream& input) {
 
 Token LexerTokenCreator::CreateIndent(size_t local_indent_counter) {
     int delta = static_cast<int>(local_indent_counter) - static_cast<int>(indent_counter_);
-    int step = static_cast<int>(lexer_consts::INDENT_STEP);
+    static const int step = static_cast<int>(lexer_consts::INDENT_STEP);
     indent_counter_ = local_indent_counter;
 
     if (delta % lexer_consts::INDENT_STEP != 0) {
@@ -149,10 +153,10 @@ Token LexerTokenCreator::CreateIndent(size_t local_indent_counter) {
         return token_type::Savedent{};
     }
     else if (delta >= step) {
-        return token_type::IndentCounter{ static_cast<size_t>(delta / step) };
+        return token_type::IndentCounter{ false, static_cast<size_t>(delta / step) };
     }
     else /*if (delta <= -step)*/ {
-        return token_type::DedentCounter{ static_cast<size_t>(-delta / step) };
+        return token_type::IndentCounter{ true, static_cast<size_t>(-delta / step) };
     }
 }
 
@@ -201,43 +205,52 @@ Token LexerTokenCreator::CreateSpecialWordOrId(std::istream& input) {
         : token_type::Id{ std::move(output) };
 }
 
+// ----------------------------------------------------------------------------
+
+void PushIndentsInPlace(std::deque<Token>& tokens, const token_type::IndentCounter& indent_cnt) {
+    for (size_t i = 0; i < indent_cnt.value; ++i) {
+        if (indent_cnt.is_dedent) {
+            tokens.push_back(token_type::Dedent{});
+        }
+        else {
+            tokens.push_back(token_type::Indent{});
+        }
+    }
+}
+
+void CheckTokensBackInPlace(std::deque<Token>& tokens) {
+    if (!tokens.empty() && !tokens.back().Is<token_type::Eof>()) {
+        if (!tokens.back().Is<token_type::Newline>()) {
+            if (!tokens.back().Is<token_type::Indent>() && !tokens.back().Is<token_type::Dedent>()) {
+                tokens.push_back(token_type::Newline{});
+            }
+        }
+        tokens.push_back(token_type::Eof{});
+    }
+}
+
+// ----------------------------------------------------------------------------
+
 std::deque<Token> SplitIntoTokens(std::istream& input) {
     LexerTokenCreator token_creator;
-    const size_t& indent_counter = token_creator.IndentCounter();
     std::deque<Token> tokens;
     while (input) {
         Token token = token_creator.NextToken(input);
-        if (token == token_type::Savedent{}) {
+        if (token.Is<token_type::Savedent>()) {
             continue;
         }
-        if (tokens.empty() && token == token_type::Newline{}) {
+        if (tokens.empty() && token.Is<token_type::Newline>()) {
             continue;
         }
         if (token.Is<token_type::IndentCounter>()) {
-            for (size_t i = 0; i < token.As<token_type::IndentCounter>().value; ++i) {
-                tokens.push_back(token_type::Indent{});
-            }
+            PushIndentsInPlace(tokens, token.As<token_type::IndentCounter>());
             continue;
-        }
-        if (token.Is<token_type::DedentCounter>()) {
-            for (size_t i = 0; i < token.As<token_type::DedentCounter>().value; ++i) {
-                tokens.push_back(token_type::Dedent{});
-            }
-            continue;
-        }
-        if (token == token_type::Eof{} && indent_counter > 0) {
-            for (size_t i = 0; i < static_cast<size_t>(indent_counter / lexer_consts::INDENT_STEP); ++i) {
-                tokens.push_back(token_type::Dedent{});
-            }
         }
         tokens.push_back(std::move(token));
     }
-    if (!tokens.empty() && tokens.back() != token_type::Eof{} && tokens.back() != token_type::Newline{}) {
-        tokens.push_back(token_type::Newline{});
-    }
-    if (tokens.empty() || tokens.back() != token_type::Eof{}) {
-        tokens.push_back(token_type::Eof{});
-    }
+
+    CheckTokensBackInPlace(tokens);
+
     return tokens;
 }
 

@@ -33,10 +33,8 @@ struct String {        // Лексема «строковая константа
     std::string value;
 };
 
-struct IndentCounter { // Лексема «увеличение отступа» с сохранением числа лексем Indent
-    size_t value;
-};
-struct DedentCounter { // Лексема «уменьшение отступа» с сохранением числа лексем Dedent
+struct IndentCounter { // Лексема сохраняющая число лексем Indent или Dedent
+    bool is_dedent;
     size_t value;
 };
 
@@ -70,10 +68,10 @@ using TokenBase
     = std::variant<token_type::Number, token_type::Id, token_type::Char, token_type::String,
                    token_type::Class, token_type::Return, token_type::If, token_type::Else,
                    token_type::Def, token_type::Newline, token_type::Print, token_type::Indent,
-                   token_type::IndentCounter, token_type::Dedent, token_type::DedentCounter,
-                   token_type::Savedent, token_type::And, token_type::Or, token_type::Not,
-                   token_type::Eq, token_type::NotEq, token_type::LessOrEq, token_type::GreaterOrEq,
-                   token_type::None, token_type::True, token_type::False, token_type::Eof>;
+                   token_type::IndentCounter, token_type::Dedent, token_type::Savedent,
+                   token_type::And, token_type::Or, token_type::Not, token_type::Eq, token_type::NotEq,
+                   token_type::LessOrEq, token_type::GreaterOrEq, token_type::None, token_type::True,
+                   token_type::False, token_type::Eof>;
 
 // ----------------------------------------------------------------------------
 
@@ -258,10 +256,6 @@ class LexerTokenCreator {
 public:
     Token NextToken(std::istream& input);
 
-    const size_t& IndentCounter() const {
-        return indent_counter_;
-    }
-
 private:
     Token SkipEmptyLinesAndCreateIndent(std::istream& input);
 
@@ -281,8 +275,15 @@ private:
 
 private:
     bool is_new_line_ = true;
+    bool is_end_of_file_ = false;
     size_t indent_counter_ = 0;
 };
+
+// ----------------------------------------------------------------------------
+
+void PushIndentsInPlace(std::deque<Token>& tokens, const token_type::IndentCounter& indent_cnt);
+
+void CheckTokensBackInPlace(std::deque<Token>& tokens);
 
 // ----------------------------------------------------------------------------
 

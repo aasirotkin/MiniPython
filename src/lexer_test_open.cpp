@@ -52,7 +52,7 @@ void TestNumbers() {
 }
 
 void TestIds() {
-    istringstream input("x    _42 big_number   Return Class  dEf"s);
+    istringstream input("x    _42 big_number   Return Class  dEf   "s);
     Lexer lexer(input);
 
     ASSERT_EQUAL(lexer.CurrentToken(), Token(token_type::Id{"x"s}));
@@ -66,15 +66,15 @@ void TestIds() {
 
 void TestStrings() {
     istringstream input(
-        R"('word' "two words" 'long string with a double quote " inside' "another long string with single quote ' inside")"s);
+        R"('word' "two words" 'long string with a double (2) quote " inside' "another long string with single ( 1 ) quote ' inside")"s);
     Lexer lexer(input);
 
     ASSERT_EQUAL(lexer.CurrentToken(), Token(token_type::String{"word"s}));
     ASSERT_EQUAL(lexer.NextToken(), Token(token_type::String{"two words"s}));
     ASSERT_EQUAL(lexer.NextToken(),
-                 Token(token_type::String{"long string with a double quote \" inside"s}));
+                 Token(token_type::String{"long string with a double (2) quote \" inside"s}));
     ASSERT_EQUAL(lexer.NextToken(),
-                 Token(token_type::String{"another long string with single quote ' inside"s}));
+                 Token(token_type::String{"another long string with single ( 1 ) quote ' inside"s}));
 }
 
 void TestOperations() {
