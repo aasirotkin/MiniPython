@@ -118,7 +118,7 @@ using Closure = std::unordered_map<std::string, ObjectHolder>;
 // ----------------------------------------------------------------------------
 
 // Проверяет, содержится ли в object значение, приводимое к True
-// Для 0, False, None, и пустых строк возвращается false, в остальных случаях - true
+// Для 0, False, None, и пустых строк возвращается false, в остальных случаях - false
 bool IsTrue(const ObjectHolder& object);
 
 // ----------------------------------------------------------------------------
@@ -136,8 +136,16 @@ public:
 
 // Строковое значение
 using String = ValueObject<std::string>;
+
+String operator+ (const String& lhs, const String& rhs);
+
 // Числовое значение
 using Number = ValueObject<int>;
+
+Number operator+ (const Number& lhs, const Number& rhs);
+Number operator- (const Number& lhs, const Number& rhs);
+Number operator* (const Number& lhs, const Number& rhs);
+Number operator/ (const Number& lhs, const Number& rhs);
 
 // Логическое значение
 class Bool : public ValueObject<bool> {
@@ -171,6 +179,9 @@ public:
     // Возвращает указатель на метод name или nullptr, если метод с таким именем отсутствует
     [[nodiscard]] const Method* GetMethod(const std::string& name) const;
 
+    // Возвращает указатель на метод name или nullptr, если метод с таким именем с таким числом параметров отсутствует
+    [[nodiscard]] const Method* GetMethod(const std::string& name, size_t args_count) const;
+
     // Возвращает имя класса
     [[nodiscard]] const std::string& GetName() const;
 
@@ -201,6 +212,13 @@ public:
     ObjectHolder Call(const std::string& method, const std::vector<ObjectHolder>& actual_args,
                       Context& context);
 
+    /*
+     * Вызывает у объекта метод method, передавая ему actual_args параметров.
+     * Параметр context задаёт контекст для выполнения метода.
+     */
+    ObjectHolder Call(const Method* method, const std::vector<ObjectHolder>& actual_args,
+                      Context& context);
+
     // Возвращает true, если объект имеет метод method, принимающий argument_count параметров
     [[nodiscard]] bool HasMethod(const std::string& method, size_t argument_count) const;
 
@@ -210,6 +228,13 @@ public:
      * метод выбрасывает исключение runtime_error
      */
     const Method* GetMethod(const std::string& method, size_t argument_count) const;
+
+    /*
+     * Возвращает указатель на Method.
+     * Если ни сам класс, ни его родители не содержат метод method, с заданным числом параметров
+     * метод возвращает nullptr
+     */
+    const Method* TryMethod(const std::string& method, size_t argument_count) const;
 
     // Возвращает ссылку на Closure, содержащий поля объекта
     [[nodiscard]] Closure& Fields();

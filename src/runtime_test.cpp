@@ -229,6 +229,361 @@ void TestNullptr() {
     ASSERT(!oh.Get());
 }
 
+void TestIsTrue() {
+    {
+        ObjectHolder oh_false = ObjectHolder::Own(Number(0));
+        ObjectHolder oh_true = ObjectHolder::Own(Number(10));
+        ASSERT(!IsTrue(oh_false));
+        ASSERT(IsTrue(oh_true));
+    }
+    {
+        ObjectHolder oh_false = ObjectHolder::Own(Bool(false));
+        ObjectHolder oh_true = ObjectHolder::Own(Bool(true));
+        ASSERT(!IsTrue(oh_false));
+        ASSERT(IsTrue(oh_true));
+    }
+    {
+        ObjectHolder oh_false = ObjectHolder::None();
+        ASSERT(!IsTrue(oh_false));
+    }
+    {
+        ObjectHolder oh_false;
+        ASSERT(!IsTrue(oh_false));
+    }
+    {
+        ObjectHolder oh_false = ObjectHolder::Own(String(""s));
+        ObjectHolder oh_true = ObjectHolder::Own(String("Yup"s));
+        ASSERT(!IsTrue(oh_false));
+        ASSERT(IsTrue(oh_true));
+    }
+    {
+        ObjectHolder oh_false = ObjectHolder::Own(ValueObject(false));
+        ASSERT(!IsTrue(oh_false));
+    }
+    {
+        ObjectHolder oh_true = ObjectHolder::Own(ValueObject(true));
+        ASSERT(!IsTrue(oh_true));
+    }
+    {
+        ObjectHolder oh_false = ObjectHolder::Own(ValueObject(0));
+        ASSERT(!IsTrue(oh_false));
+    }
+    {
+        ObjectHolder oh_true = ObjectHolder::Own(Class("Base"s, {}, nullptr));
+        ASSERT(!IsTrue(oh_true));
+    }
+    {
+        Class cls("Base"s, {}, nullptr);
+        ObjectHolder oh_true = ObjectHolder::Own(ClassInstance(cls));
+        ASSERT(!IsTrue(oh_true));
+    }
+}
+
+void TestEqualSimple() {
+    DummyContext ctx;
+    {
+        ObjectHolder oh_number_1 = ObjectHolder::Own(Number(1));
+        ObjectHolder oh_number_2 = ObjectHolder::Own(Number(1));
+        ASSERT(Equal(oh_number_1, oh_number_2, ctx));
+    }
+    {
+        ObjectHolder oh_number_1 = ObjectHolder::Own(Number(1));
+        ObjectHolder oh_number_2 = ObjectHolder::Own(Number(2));
+        ASSERT(!Equal(oh_number_1, oh_number_2, ctx));
+    }
+    {
+        ObjectHolder oh_str_1 = ObjectHolder::Own(String(""));
+        ObjectHolder oh_str_2 = ObjectHolder::Own(String(""));
+        ASSERT(Equal(oh_str_1, oh_str_2, ctx));
+    }
+    {
+        ObjectHolder oh_str_1 = ObjectHolder::Own(String("Yuppy"));
+        ObjectHolder oh_str_2 = ObjectHolder::Own(String("Yuppy"));
+        ASSERT(Equal(oh_str_1, oh_str_2, ctx));
+    }
+    {
+        ObjectHolder oh_str_1 = ObjectHolder::Own(String("Yuppy"));
+        ObjectHolder oh_str_2 = ObjectHolder::Own(String("Crappy"));
+        ASSERT(!Equal(oh_str_1, oh_str_2, ctx));
+    }
+    {
+        ObjectHolder oh_bl_1 = ObjectHolder::Own(Bool(true));
+        ObjectHolder oh_bl_2 = ObjectHolder::Own(Bool(true));
+        ASSERT(Equal(oh_bl_1, oh_bl_2, ctx));
+    }
+    {
+        ObjectHolder oh_bl_1 = ObjectHolder::Own(Bool(true));
+        ObjectHolder oh_bl_2 = ObjectHolder::Own(Bool(false));
+        ASSERT(!Equal(oh_bl_1, oh_bl_2, ctx));
+    }
+    {
+        ObjectHolder oh_nm_1 = ObjectHolder::Own(Number(3));
+        ObjectHolder oh_bl_1 = ObjectHolder::Own(Bool(true));
+        ASSERT_THROWS(Equal(oh_nm_1, oh_bl_1, ctx), runtime_error);
+    }
+    {
+        ObjectHolder oh_none_1 = ObjectHolder::None();
+        ObjectHolder oh_none_2 = ObjectHolder::None();
+        ASSERT(Equal(oh_none_1, oh_none_2, ctx));
+    }
+    {
+        ObjectHolder oh_none_1 = ObjectHolder::None();
+        ObjectHolder oh_nm_1 = ObjectHolder::Own(Number(3));
+        ASSERT_THROWS(Equal(oh_none_1, oh_nm_1, ctx), runtime_error);
+    }
+    {
+        vector<Method> methods;
+        ObjectHolder oh_true = ObjectHolder::Own(Bool{ true });
+        auto base_method_true = [&oh_true](Closure&, Context&) {
+            return oh_true;
+        };
+        methods.push_back({ "__eq__"s, { "other"s }, make_unique<TestMethodBody>(base_method_true) });
+        Class cls("Base"s, std::move(methods), nullptr);
+        ClassInstance ci(cls);
+        ObjectHolder oh_ci = ObjectHolder::Share(ci);
+        ObjectHolder oh_nm_1 = ObjectHolder::Own(Number(3));
+        ASSERT(Equal(oh_ci, oh_nm_1, ctx));
+    }
+    {
+        vector<Method> methods;
+        ObjectHolder oh_false = ObjectHolder::Own(Bool{ false });
+        auto base_method_false = [&oh_false](Closure&, Context&) {
+            return oh_false;
+        };
+        methods.push_back({ "__eq__"s, { "other"s }, make_unique<TestMethodBody>(base_method_false) });
+        Class cls("Base"s, std::move(methods), nullptr);
+        ClassInstance ci(cls);
+        ObjectHolder oh_ci = ObjectHolder::Share(ci);
+        ObjectHolder oh_nm_1 = ObjectHolder::Own(Bool(true));
+        ASSERT(!Equal(oh_ci, oh_nm_1, ctx));
+    }
+}
+
+void TestEqualLessGreater() {
+    DummyContext ctx;
+    {
+        ObjectHolder oh_number_1 = ObjectHolder::Own(Number(1));
+        ObjectHolder oh_number_2 = ObjectHolder::Own(Number(15));
+        ASSERT(Equal(oh_number_1, oh_number_1, ctx));
+        ASSERT(NotEqual(oh_number_1, oh_number_2, ctx));
+        ASSERT(Less(oh_number_1, oh_number_2, ctx));
+        ASSERT(LessOrEqual(oh_number_1, oh_number_2, ctx));
+        ASSERT(LessOrEqual(oh_number_2, oh_number_2, ctx));
+        ASSERT(Greater(oh_number_2, oh_number_1, ctx));
+        ASSERT(GreaterOrEqual(oh_number_2, oh_number_1, ctx));
+        ASSERT(GreaterOrEqual(oh_number_2, oh_number_2, ctx));
+    }
+    {
+        ObjectHolder oh_str_1 = ObjectHolder::Own(String("a"));
+        ObjectHolder oh_str_2 = ObjectHolder::Own(String("b"));
+        ASSERT(Equal(oh_str_1, oh_str_1, ctx));
+        ASSERT(NotEqual(oh_str_1, oh_str_2, ctx));
+        ASSERT(Less(oh_str_1, oh_str_2, ctx));
+        ASSERT(LessOrEqual(oh_str_1, oh_str_2, ctx));
+        ASSERT(LessOrEqual(oh_str_2, oh_str_2, ctx));
+        ASSERT(Greater(oh_str_2, oh_str_1, ctx));
+        ASSERT(GreaterOrEqual(oh_str_2, oh_str_1, ctx));
+        ASSERT(GreaterOrEqual(oh_str_2, oh_str_2, ctx));
+    }
+    {
+        ObjectHolder oh_bl_1 = ObjectHolder::Own(Bool(false)); // 0
+        ObjectHolder oh_bl_2 = ObjectHolder::Own(Bool(true)); // 1
+        ASSERT(Equal(oh_bl_1, oh_bl_1, ctx));
+        ASSERT(NotEqual(oh_bl_1, oh_bl_2, ctx));
+        ASSERT(Less(oh_bl_1, oh_bl_2, ctx));
+        ASSERT(LessOrEqual(oh_bl_1, oh_bl_2, ctx));
+        ASSERT(LessOrEqual(oh_bl_2, oh_bl_2, ctx));
+        ASSERT(Greater(oh_bl_2, oh_bl_1, ctx));
+        ASSERT(GreaterOrEqual(oh_bl_2, oh_bl_1, ctx));
+        ASSERT(GreaterOrEqual(oh_bl_2, oh_bl_2, ctx));
+    }
+    {
+        ObjectHolder oh_none_1 = ObjectHolder::None();
+        ObjectHolder oh_none_2 = ObjectHolder::None();
+        ASSERT_DOESNT_THROW(Equal(oh_none_1, oh_none_1, ctx), runtime_error);
+        ASSERT_DOESNT_THROW(NotEqual(oh_none_1, oh_none_1, ctx), runtime_error);
+        ASSERT_THROWS(Less(oh_none_1, oh_none_1, ctx), runtime_error);
+        ASSERT_THROWS(LessOrEqual(oh_none_1, oh_none_1, ctx), runtime_error);
+        ASSERT_THROWS(Greater(oh_none_1, oh_none_1, ctx), runtime_error);
+        ASSERT_THROWS(GreaterOrEqual(oh_none_1, oh_none_1, ctx), runtime_error);
+    }
+    {
+        ObjectHolder oh_none_1 = ObjectHolder::None();
+        ObjectHolder oh_nm_1 = ObjectHolder::Own(Number(3));
+        ASSERT_THROWS(Equal(oh_none_1, oh_nm_1, ctx), runtime_error);
+        ASSERT_THROWS(NotEqual(oh_none_1, oh_nm_1, ctx), runtime_error);
+        ASSERT_THROWS(Less(oh_none_1, oh_nm_1, ctx), runtime_error);
+        ASSERT_THROWS(LessOrEqual(oh_none_1, oh_nm_1, ctx), runtime_error);
+        ASSERT_THROWS(LessOrEqual(oh_none_1, oh_nm_1, ctx), runtime_error);
+        ASSERT_THROWS(Greater(oh_none_1, oh_nm_1, ctx), runtime_error);
+        ASSERT_THROWS(GreaterOrEqual(oh_none_1, oh_nm_1, ctx), runtime_error);
+        ASSERT_THROWS(GreaterOrEqual(oh_none_1, oh_nm_1, ctx), runtime_error);
+    }
+
+    ObjectHolder oh_true = ObjectHolder::Own(Bool{ true });
+    auto base_method_true = [&oh_true](Closure&, Context&) {
+        return oh_true;
+    };
+    ObjectHolder oh_false = ObjectHolder::Own(Bool{ false });
+    auto base_method_false = [&oh_false](Closure&, Context&) {
+        return oh_false;
+    };
+    {
+        vector<Method> methods;
+        methods.push_back({ "__lt__"s, { "other"s }, make_unique<TestMethodBody>(base_method_true) });
+        methods.push_back({ "__eq__"s, { "other"s }, make_unique<TestMethodBody>(base_method_false) });
+        Class cls("Base"s, std::move(methods), nullptr);
+        ClassInstance ci(cls);
+        ObjectHolder oh_ci = ObjectHolder::Share(ci);
+        ObjectHolder oh_nm_1 = ObjectHolder::Own(Number(3));
+        ASSERT(!Equal(oh_ci, oh_nm_1, ctx));
+        ASSERT(NotEqual(oh_ci, oh_nm_1, ctx));
+        ASSERT(Less(oh_ci, oh_nm_1, ctx));
+        ASSERT(LessOrEqual(oh_ci, oh_nm_1, ctx));
+        ASSERT(!Greater(oh_ci, oh_nm_1, ctx));
+        ASSERT(!GreaterOrEqual(oh_ci, oh_nm_1, ctx));
+    }
+    {
+        vector<Method> methods;
+        methods.push_back({ "__lt__"s, { "other"s }, make_unique<TestMethodBody>(base_method_false) });
+        methods.push_back({ "__eq__"s, { "other"s }, make_unique<TestMethodBody>(base_method_true) });
+        Class cls("Base"s, std::move(methods), nullptr);
+        ClassInstance ci(cls);
+        ObjectHolder oh_ci = ObjectHolder::Share(ci);
+        ObjectHolder oh_nm_1 = ObjectHolder::Own(Number(3));
+        ASSERT(Equal(oh_ci, oh_nm_1, ctx));
+        ASSERT(!NotEqual(oh_ci, oh_nm_1, ctx));
+        ASSERT(!Less(oh_ci, oh_nm_1, ctx));
+        ASSERT(LessOrEqual(oh_ci, oh_nm_1, ctx));
+        ASSERT(!Greater(oh_ci, oh_nm_1, ctx));
+        ASSERT(GreaterOrEqual(oh_ci, oh_nm_1, ctx));
+    }
+    {
+        vector<Method> methods;
+        methods.push_back({ "__lt__"s, { "other"s }, make_unique<TestMethodBody>(base_method_false) });
+        methods.push_back({ "__eq__"s, { "other"s }, make_unique<TestMethodBody>(base_method_false) });
+        Class cls("Base"s, std::move(methods), nullptr);
+        ClassInstance ci(cls);
+        ObjectHolder oh_ci = ObjectHolder::Share(ci);
+        ObjectHolder oh_nm_1 = ObjectHolder::Own(Number(3));
+        ASSERT(!Equal(oh_ci, oh_nm_1, ctx));
+        ASSERT(NotEqual(oh_ci, oh_nm_1, ctx));
+        ASSERT(!Less(oh_ci, oh_nm_1, ctx));
+        ASSERT(!LessOrEqual(oh_ci, oh_nm_1, ctx));
+        ASSERT(Greater(oh_ci, oh_nm_1, ctx));
+        ASSERT(GreaterOrEqual(oh_ci, oh_nm_1, ctx));
+    }
+    {
+        vector<Method> methods;
+        Class cls("Base"s, std::move(methods), nullptr);
+        ClassInstance ci(cls);
+        ObjectHolder oh_ci = ObjectHolder::Share(ci);
+        ObjectHolder oh_nm_1 = ObjectHolder::Own(Number(3));
+        ASSERT_THROWS(!Equal(oh_ci, oh_nm_1, ctx), runtime_error);
+        ASSERT_THROWS(NotEqual(oh_ci, oh_nm_1, ctx), runtime_error);
+        ASSERT_THROWS(!Less(oh_ci, oh_nm_1, ctx), runtime_error);
+        ASSERT_THROWS(!LessOrEqual(oh_ci, oh_nm_1, ctx), runtime_error);
+        ASSERT_THROWS(Greater(oh_ci, oh_nm_1, ctx), runtime_error);
+        ASSERT_THROWS(GreaterOrEqual(oh_ci, oh_nm_1, ctx), runtime_error);
+    }
+}
+
+// ----------------------------------------------------------------------------
+
+class BoolExecutable : public Executable {
+public:
+    explicit BoolExecutable(bool value)
+        : value_(Bool{ value }) {
+    }
+
+    ObjectHolder Execute(Closure&, Context&) override {
+        return ObjectHolder::Share(value_);
+    }
+private:
+    Bool value_;
+};
+
+void TestComparisonAmrulla() {
+    {
+        Class cls{ "class", {}, nullptr };
+        ClassInstance instance{ cls };
+        DummyContext context;
+        ObjectHolder lhs = ObjectHolder::Share(instance);
+        ObjectHolder rhs = ObjectHolder::Share(instance);
+        ASSERT_THROWS(Equal(lhs, rhs, context), std::runtime_error);
+        ASSERT_THROWS(NotEqual(lhs, rhs, context), std::runtime_error);
+        ASSERT_THROWS(Less(lhs, rhs, context), std::runtime_error);
+        ASSERT_THROWS(LessOrEqual(lhs, rhs, context), std::runtime_error);
+        ASSERT_THROWS(Greater(lhs, rhs, context), std::runtime_error);
+        ASSERT_THROWS(GreaterOrEqual(lhs, rhs, context), std::runtime_error);
+    }
+
+    {
+        std::vector<std::string> formal_params = { "rhs"s };
+        Method eq{ "__eq__"s, formal_params, std::unique_ptr<Executable>(new BoolExecutable(true)) };
+        Method lt{ "__lt__"s, formal_params, std::unique_ptr<Executable>(new BoolExecutable(false)) };
+        vector<Method> methods;
+        methods.push_back(std::move(eq));
+        methods.push_back(std::move(lt));
+
+        Class cls{ "class", std::move(methods), nullptr };
+        ClassInstance instance{ cls };
+        DummyContext context;
+        ObjectHolder lhs = ObjectHolder::Share(instance);
+        ObjectHolder rhs = ObjectHolder::Share(instance);
+        ASSERT_EQUAL(Equal(lhs, rhs, context), true);
+        ASSERT_EQUAL(NotEqual(lhs, rhs, context), false);
+        ASSERT_EQUAL(Less(lhs, rhs, context), false);
+        ASSERT_EQUAL(Greater(lhs, rhs, context), false);
+        ASSERT_EQUAL(LessOrEqual(lhs, rhs, context), true);
+        ASSERT_EQUAL(GreaterOrEqual(lhs, rhs, context), true);
+    }
+
+    {
+        std::vector<std::string> formal_params = { "rhs"s };
+        Method eq{ "__eq__"s, formal_params, std::unique_ptr<Executable>(new BoolExecutable(false)) };
+        Method lt{ "__lt__"s, formal_params, std::unique_ptr<Executable>(new BoolExecutable(true)) };
+        vector<Method> methods;
+        methods.push_back(std::move(eq));
+        methods.push_back(std::move(lt));
+
+        Class cls{ "class", std::move(methods), nullptr };
+        ClassInstance instance{ cls };
+        DummyContext context;
+        ObjectHolder lhs = ObjectHolder::Share(instance);
+        ObjectHolder rhs = ObjectHolder::Share(instance);
+        ASSERT_EQUAL(Equal(lhs, rhs, context), false);
+        ASSERT_EQUAL(NotEqual(lhs, rhs, context), true);
+        ASSERT_EQUAL(Less(lhs, rhs, context), true);
+        ASSERT_EQUAL(Greater(lhs, rhs, context), false);
+        ASSERT_EQUAL(LessOrEqual(lhs, rhs, context), true);
+        ASSERT_EQUAL(GreaterOrEqual(lhs, rhs, context), false);
+    }
+
+    {
+        std::vector<std::string> formal_params = { "rhs"s };
+        Method eq{ "__eq__"s, formal_params, std::unique_ptr<Executable>(new BoolExecutable(false)) };
+        Method lt{ "__lt__"s, formal_params, std::unique_ptr<Executable>(new BoolExecutable(false)) };
+        vector<Method> methods;
+        methods.push_back(std::move(eq));
+        methods.push_back(std::move(lt));
+
+        Class cls{ "class", std::move(methods), nullptr };
+        ClassInstance instance{ cls };
+        DummyContext context;
+        ObjectHolder lhs = ObjectHolder::Share(instance);
+        ObjectHolder rhs = ObjectHolder::Share(instance);
+        ASSERT_EQUAL(Equal(lhs, rhs, context), false);
+        ASSERT_EQUAL(NotEqual(lhs, rhs, context), true);
+        ASSERT_EQUAL(Less(lhs, rhs, context), false);
+        ASSERT_EQUAL(Greater(lhs, rhs, context), true);
+        ASSERT_EQUAL(LessOrEqual(lhs, rhs, context), false);
+        ASSERT_EQUAL(GreaterOrEqual(lhs, rhs, context), true);
+    }
+}
+
+// ----------------------------------------------------------------------------
+
 }  // namespace
 
 void RunObjectsTests(TestRunner& tr) {
@@ -242,6 +597,13 @@ void RunObjectHolderTests(TestRunner& tr) {
     RUN_TEST(tr, runtime::TestOwning);
     RUN_TEST(tr, runtime::TestMove);
     RUN_TEST(tr, runtime::TestNullptr);
+}
+
+void RunComparisonTests(TestRunner& tr) {
+    RUN_TEST(tr, runtime::TestComparisonAmrulla);
+    RUN_TEST(tr, runtime::TestIsTrue);
+    RUN_TEST(tr, runtime::TestEqualSimple);
+    RUN_TEST(tr, runtime::TestEqualLessGreater);
 }
 
 }  // namespace runtime

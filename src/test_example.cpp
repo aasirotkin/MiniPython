@@ -24,6 +24,7 @@ namespace runtime {
 
 void RunObjectHolderTests(TestRunner& tr);
 void RunObjectsTests(TestRunner& tr);
+void RunComparisonTests(TestRunner& tr);
 
 } // namespace runtime
 
@@ -116,11 +117,70 @@ print y.value
     ASSERT_EQUAL(output.str(), "2\n3\n");
 }
 
+void TestComparison() {
+    istringstream input(R"(
+class Point:
+  def __init__(px, py):
+    self.px = px
+    self.py = py
+
+  def __eq__(other):
+    px_bool = (self.px == other.px)
+    py_bool = (self.py == other.py)
+    return px_bool and py_bool
+
+  def __lt__(other):
+    pxy_self = self.px * self.py
+    pxy_other = other.px * other.py
+    return pxy_self < pxy_other
+
+  def TestOr(value):
+    return self.px == value or self.py == value
+
+  def TestAnd(value):
+    return self.px == value and self.py == value
+
+  def TestNot(value):
+    return not (self.px == value) and not (self.py == value)
+
+class Point2(Point):
+  def __init__(px, py):
+    self.px = px
+    self.py = py
+
+class Point3(Point2):
+  def __init__(px, py):
+    self.px = px
+    self.py = py
+
+p1 = Point(1, 1)
+p2 = Point2(2, 2)
+p3 = Point3(2, 2)
+
+p4 = None
+p5 = None
+
+print (p1 == p2), (p1 != p2), (p2 == p3), (p2 != p3)
+
+print (p1 < p2), (p1 >= p2), (p2 <= p3), (p3 > p1), (p4 == p5)
+
+p5 = Point(1, 2)
+
+print p5.TestOr(0), p5.TestOr(1), p5.TestAnd(1), p5.TestAnd(2), p5.TestNot(6)
+)");
+
+    ostringstream output;
+    RunMythonProgram(input, output);
+
+    ASSERT_EQUAL(output.str(), "False True True False\nTrue False True True True\nFalse True False False True\n");
+}
+
 void TestAll() {
     TestRunner tr;
     parse::RunOpenLexerTests(tr);
     runtime::RunObjectHolderTests(tr);
     runtime::RunObjectsTests(tr);
+    runtime::RunComparisonTests(tr);
     ast::RunUnitTests(tr);
     parse::TestParseProgram(tr);
 
@@ -128,6 +188,7 @@ void TestAll() {
     RUN_TEST(tr, TestAssignments);
     RUN_TEST(tr, TestArithmetics);
     RUN_TEST(tr, TestVariablesArePointers);
+    RUN_TEST(tr, TestComparison);
 }
 
 } // namespace tests

@@ -15,6 +15,9 @@ namespace {
     const string ADD_METHOD = "__add__"s;
     const string INIT_METHOD = "__init__"s;
     const string STR_METHOD = "__str__"s;
+
+    static const ObjectHolder OBJECT_HOLDER_TRUE = ObjectHolder::Own(runtime::Bool(true));
+    static const ObjectHolder OBJECT_HOLDER_FALSE = ObjectHolder::Own(runtime::Bool(false));
 }  // namespace
 
 // ----------------------------------------------------------------------------
@@ -29,8 +32,7 @@ VariableValue::VariableValue(std::vector<std::string> dotted_ids)
 
 ObjectHolder VariableValue::Execute(Closure& closure, Context& /*context*/) {
     Closure* ptr_closure = &closure;
-    size_t i = 1;
-    for (; i < dotted_ids_.size(); ++i) {
+    for (size_t i = 1; i < dotted_ids_.size(); ++i) {
         const std::string& id = dotted_ids_.at(i - 1);
         if (ptr_closure->count(id)) {
             if (auto* p = ptr_closure->at(id).TryAs<runtime::ClassInstance>()) {
@@ -96,8 +98,7 @@ ObjectHolder NewInstance::Execute(Closure& closure, Context& context) {
         }
         ci_.Call(INIT_METHOD, args_values, context);
     }
-    ObjectHolder oh = ObjectHolder::Share(ci_);
-    return oh;
+    return ObjectHolder::Share(ci_);
 }
 
 // ----------------------------------------------------------------------------
@@ -111,54 +112,28 @@ Print::Print(vector<unique_ptr<Statement>> args)
 }
 
 unique_ptr<Print> Print::Variable(const std::string& name) {
-    VariableValue value(name);
-    std::vector<std::unique_ptr<Statement>> args;
-    args.push_back(std::make_unique<VariableValue>(std::move(value)));
-    return std::make_unique<Print>(std::move(args));
+    return std::make_unique<Print>(std::make_unique<VariableValue>(name));
 }
 
 ObjectHolder Print::Execute(Closure& closure, Context& context) {
     bool first = true;
+    ostream& out = context.GetOutputStream();
     for (const auto& unuque_ptr_statement : args_) {
         if (!first) {
-            context.GetOutputStream() << ' ';
+            out << ' ';
         }
         first = false;
-        Statement* st = unuque_ptr_statement.get();
-        ObjectHolder oh = st->Execute(closure, context);
+
+        ObjectHolder oh = unuque_ptr_statement->Execute(closure, context);
         if (oh) {
-            runtime::Object* ob = oh.Get();
-            ob->Print(context.GetOutputStream(), context);
+            oh->Print(out, context);
         }
         else {
-            static const char* none_str = "None";
-            context.GetOutputStream() << none_str;
+            out << "None"sv;
         }
     }
-    context.GetOutputStream() << '\n';
+    out << '\n';
     return {};
-}
-
-// ----------------------------------------------------------------------------
-
-ObjectHolder Stringify::Execute(Closure& closure, Context& context) {
-    ObjectHolder oh = GetArg().get()->Execute(closure, context);
-    if (auto* p = oh.TryAs<runtime::ClassInstance>()) {
-        if (p->HasMethod(STR_METHOD, 0)) {
-            oh = p->Call(STR_METHOD, {}, context);
-        }
-    }
-
-    std::string value("None"s);
-    if (oh) {
-        std::stringstream ss;
-        static runtime::DummyContext empty;
-        oh.Get()->Print(ss, empty);
-        value = ss.str();
-    }
-
-    runtime::String str(value);
-    return ObjectHolder::Own(std::move(str));
 }
 
 // ----------------------------------------------------------------------------
@@ -173,62 +148,65 @@ MethodCall::MethodCall(std::unique_ptr<Statement> object, std::string method,
 ObjectHolder MethodCall::Execute(Closure& closure, Context& context) {
     ObjectHolder oh = object_->Execute(closure, context);
     if (auto* p = oh.TryAs<runtime::ClassInstance>()) {
-        if (p->HasMethod(method_, args_.size())) {
-            std::vector<ObjectHolder> args_values;
-            for (const auto& args_i : args_) {
-                args_values.push_back(args_i->Execute(closure, context));
-            }
-            return p->Call(method_, args_values, context);
+        std::vector<ObjectHolder> args_values;
+        for (const auto& args_i : args_) {
+            args_values.push_back(args_i->Execute(closure, context));
         }
+        return p->Call(method_, args_values, context);
     }
     return {};
+}
+
+// ----------------------------------------------------------------------------
+
+ObjectHolder Stringify::Execute(Closure& closure, Context& context) {
+    ObjectHolder oh = arg_->Execute(closure, context);
+    if (auto* p = oh.TryAs<runtime::ClassInstance>()) {
+        if (p->HasMethod(STR_METHOD, 0)) {
+            oh = p->Call(STR_METHOD, {}, context);
+        }
+    }
+
+    std::string value("None"s);
+    if (oh) {
+        static runtime::DummyContext empty;
+        std::stringstream ss;
+        oh->Print(ss, empty);
+        value = ss.str();
+    }
+
+    return ObjectHolder::Own(runtime::String(value));
 }
 
 // ----------------------------------------------------------------------------
 
 ObjectHolder Add::Execute(Closure& closure, Context& context) {
-    ObjectHolder lhs_oh = GetLhs()->Execute(closure, context);
-    ObjectHolder rhs_oh = GetRhs()->Execute(closure, context);
+    ObjectHolder lhs_oh = lhs_->Execute(closure, context);
+    ObjectHolder rhs_oh = rhs_->Execute(closure, context);
 
     if (lhs_oh.IsType<runtime::Number>() && rhs_oh.IsType<runtime::Number>()) {
-        runtime::Number value(
-            lhs_oh.TryAs<runtime::Number>()->GetValue() +
-            rhs_oh.TryAs<runtime::Number>()->GetValue());
-        return ObjectHolder::Own(std::move(value));
+        return ObjectHolder::Own(*lhs_oh.TryAs<runtime::Number>() + *rhs_oh.TryAs<runtime::Number>());
     }
 
     if (lhs_oh.IsType<runtime::String>() && rhs_oh.IsType<runtime::String>()) {
-        runtime::String value(
-            lhs_oh.TryAs<runtime::String>()->GetValue() +
-            rhs_oh.TryAs<runtime::String>()->GetValue());
-        return ObjectHolder::Own(std::move(value));
+        return ObjectHolder::Own(*lhs_oh.TryAs<runtime::String>() + *rhs_oh.TryAs<runtime::String>());
     }
 
-    if (lhs_oh.IsType<runtime::ClassInstance>()) {
-        auto* p_lhs = lhs_oh.TryAs<runtime::ClassInstance>();
-        if (p_lhs->HasMethod(ADD_METHOD, 1)) {
-            std::vector<ObjectHolder> args({ rhs_oh });
-            ObjectHolder value = p_lhs->Call(ADD_METHOD, args, context);
-            return value;
-        }
+    if (auto* p_lhs = lhs_oh.TryAs<runtime::ClassInstance>()) {
+        return p_lhs->Call(ADD_METHOD, { rhs_oh }, context);
     }
 
     throw std::runtime_error("Couldn't add this objects :("s);
-
-    return {};
 }
 
 // ----------------------------------------------------------------------------
 
 ObjectHolder Sub::Execute(Closure& closure, Context& context) {
-    ObjectHolder lhs_oh = GetLhs()->Execute(closure, context);
-    ObjectHolder rhs_oh = GetRhs()->Execute(closure, context);
+    ObjectHolder lhs_oh = lhs_->Execute(closure, context);
+    ObjectHolder rhs_oh = rhs_->Execute(closure, context);
 
     if (lhs_oh.IsType<runtime::Number>() && rhs_oh.IsType<runtime::Number>()) {
-        runtime::Number value(
-            lhs_oh.TryAs<runtime::Number>()->GetValue() -
-            rhs_oh.TryAs<runtime::Number>()->GetValue());
-        return ObjectHolder::Own(std::move(value));
+        return ObjectHolder::Own(*lhs_oh.TryAs<runtime::Number>() - *rhs_oh.TryAs<runtime::Number>());
     }
 
     throw std::runtime_error("Couldn't sub this objects :("s);
@@ -239,17 +217,14 @@ ObjectHolder Sub::Execute(Closure& closure, Context& context) {
 // ----------------------------------------------------------------------------
 
 ObjectHolder Mult::Execute(Closure& closure, Context& context) {
-    ObjectHolder lhs_oh = GetLhs()->Execute(closure, context);
-    ObjectHolder rhs_oh = GetRhs()->Execute(closure, context);
+    ObjectHolder lhs_oh = lhs_->Execute(closure, context);
+    ObjectHolder rhs_oh = rhs_->Execute(closure, context);
 
     if (lhs_oh.IsType<runtime::Number>() && rhs_oh.IsType<runtime::Number>()) {
-        runtime::Number value(
-            lhs_oh.TryAs<runtime::Number>()->GetValue() *
-            rhs_oh.TryAs<runtime::Number>()->GetValue());
-        return ObjectHolder::Own(std::move(value));
+        return ObjectHolder::Own((*lhs_oh.TryAs<runtime::Number>()) * (*rhs_oh.TryAs<runtime::Number>()));
     }
 
-    throw std::runtime_error("Couldn't muld this objects :("s);
+    throw std::runtime_error("Couldn't mult this objects :("s);
 
     return {};
 }
@@ -257,17 +232,11 @@ ObjectHolder Mult::Execute(Closure& closure, Context& context) {
 // ----------------------------------------------------------------------------
 
 ObjectHolder Div::Execute(Closure& closure, Context& context) {
-    ObjectHolder lhs_oh = GetLhs()->Execute(closure, context);
-    ObjectHolder rhs_oh = GetRhs()->Execute(closure, context);
+    ObjectHolder lhs_oh = lhs_->Execute(closure, context);
+    ObjectHolder rhs_oh = rhs_->Execute(closure, context);
 
     if (lhs_oh.IsType<runtime::Number>() && rhs_oh.IsType<runtime::Number>()) {
-        auto divider = rhs_oh.TryAs<runtime::Number>()->GetValue();
-        if (divider != 0) {
-            runtime::Number value(
-                lhs_oh.TryAs<runtime::Number>()->GetValue() /
-                divider);
-            return ObjectHolder::Own(std::move(value));
-        }
+        return ObjectHolder::Own((*lhs_oh.TryAs<runtime::Number>()) / (*rhs_oh.TryAs<runtime::Number>()));
     }
 
     throw std::runtime_error("Couldn't div this objects :("s);
@@ -281,52 +250,40 @@ ObjectHolder Compound::Execute(Closure& closure, Context& context) {
     for (auto& op : operations_) {
         op->Execute(closure, context);
     }
-    return ObjectHolder::None();
+    return {};
 }
 
 // ----------------------------------------------------------------------------
 
 ObjectHolder Or::Execute(Closure& closure, Context& context) {
-    static const ObjectHolder local_true = ObjectHolder::Own(runtime::Bool(true));
-    static const ObjectHolder local_false = ObjectHolder::Own(runtime::Bool(false));
-
-    ObjectHolder lhs_oh = GetLhs()->Execute(closure, context);
-
+    ObjectHolder lhs_oh = lhs_->Execute(closure, context);
     if (!runtime::IsTrue(lhs_oh)) {
-        ObjectHolder rhs_oh = GetRhs()->Execute(closure, context);
+        ObjectHolder rhs_oh = rhs_->Execute(closure, context);
         if (!runtime::IsTrue(rhs_oh)) {
-            return local_false;
+            return OBJECT_HOLDER_FALSE;
         }
     }
-    return local_true;
+    return OBJECT_HOLDER_TRUE;
 }
 
 // ----------------------------------------------------------------------------
 
 ObjectHolder And::Execute(Closure& closure, Context& context) {
-    static const ObjectHolder local_true = ObjectHolder::Own(runtime::Bool(true));
-    static const ObjectHolder local_false = ObjectHolder::Own(runtime::Bool(false));
-
-    ObjectHolder lhs_oh = GetLhs()->Execute(closure, context);
-
+    ObjectHolder lhs_oh = lhs_->Execute(closure, context);
     if (runtime::IsTrue(lhs_oh)) {
-        ObjectHolder rhs_oh = GetRhs()->Execute(closure, context);
+        ObjectHolder rhs_oh = rhs_->Execute(closure, context);
         if (runtime::IsTrue(rhs_oh)) {
-            return local_true;
+            return OBJECT_HOLDER_TRUE;
         }
     }
-    return local_false;
+    return OBJECT_HOLDER_FALSE;
 }
 
 // ----------------------------------------------------------------------------
 
 ObjectHolder Not::Execute(Closure& closure, Context& context) {
-    static const ObjectHolder local_true = ObjectHolder::Own(runtime::Bool(true));
-    static const ObjectHolder local_false = ObjectHolder::Own(runtime::Bool(false));
-
-    ObjectHolder oh = GetArg()->Execute(closure, context);
-
-    return (runtime::IsTrue(oh)) ? local_false : local_true;
+    ObjectHolder oh = arg_->Execute(closure, context);
+    return (runtime::IsTrue(oh)) ? OBJECT_HOLDER_FALSE : OBJECT_HOLDER_TRUE;
 }
 
 // ----------------------------------------------------------------------------
@@ -337,17 +294,12 @@ Comparison::Comparison(Comparator cmp, unique_ptr<Statement> lhs, unique_ptr<Sta
 }
 
 ObjectHolder Comparison::Execute(Closure& closure, Context& context) {
-    static const ObjectHolder local_true = ObjectHolder::Own(runtime::Bool(true));
-    static const ObjectHolder local_false = ObjectHolder::Own(runtime::Bool(false));
-
-    ObjectHolder lhs_oh = GetLhs()->Execute(closure, context);
-    ObjectHolder rhs_oh = GetRhs()->Execute(closure, context);
-
+    ObjectHolder lhs_oh = lhs_->Execute(closure, context);
+    ObjectHolder rhs_oh = rhs_->Execute(closure, context);
     if (cmp_(lhs_oh, rhs_oh, context)) {
-        return local_true;
+        return OBJECT_HOLDER_TRUE;
     }
-
-    return local_false;
+    return OBJECT_HOLDER_FALSE;
 }
 
 // ----------------------------------------------------------------------------
@@ -371,7 +323,7 @@ ObjectHolder MethodBody::Execute(Closure& closure, Context& context) {
     catch (ReturnException& ret) {
         return ret.GetResult();
     }
-    return ObjectHolder::None();
+    return {};
 }
 
 // ----------------------------------------------------------------------------

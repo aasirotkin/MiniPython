@@ -9,6 +9,18 @@ using namespace std;
 
 namespace runtime {
 
+namespace runtime_string_consts {
+
+static const std::string SELF("self"s);
+static const std::string TRUE("True"s);
+static const std::string FALSE("False"s);
+static const std::string CLASS("Class"s);
+static const std::string STR("__str__"s);
+static const std::string EQ("__eq__"s);
+static const std::string LT("__lt__"s);
+
+} // namespace runtime_string_consts
+
 // ----------------------------------------------------------------------------
 
 ObjectHolder::ObjectHolder(std::shared_ptr<Object> data)
@@ -53,6 +65,7 @@ bool IsTrue(const ObjectHolder& object) {
     if (!object) {
         return false;
     }
+
 #define IS_CASTED_AND_NOT_EQUAL(type, value) \
     if (auto p = object.TryAs<type>()) return p->GetValue() != value;
 
@@ -61,14 +74,45 @@ bool IsTrue(const ObjectHolder& object) {
     IS_CASTED_AND_NOT_EQUAL(Bool, false);
 
 #undef IS_CASTED_AND_NOT_EQUAL
-    return true;
+    return false;
 }
 
 // ----------------------------------------------------------------------------
 
-void Bool::Print(std::ostream& os, Context& context) {
-    (void)context;
-    os << (GetValue() ? "True"sv : "False"sv);
+String operator+(const String& lhs, const String& rhs)
+{
+    return String(lhs.GetValue() + rhs.GetValue());
+}
+
+Number operator+(const Number& lhs, const Number& rhs)
+{
+    return Number(lhs.GetValue() + rhs.GetValue());
+}
+
+Number operator-(const Number& lhs, const Number& rhs)
+{
+    return Number(lhs.GetValue() - rhs.GetValue());
+}
+
+Number operator*(const Number& lhs, const Number& rhs)
+{
+    return Number(lhs.GetValue() * rhs.GetValue());
+}
+
+Number operator/(const Number& lhs, const Number& rhs)
+{
+    if (rhs.GetValue() == 0) {
+        throw runtime_error("Divider equals to zero"s);
+    }
+    return Number(lhs.GetValue() / rhs.GetValue());
+}
+
+// ----------------------------------------------------------------------------
+
+// ----------------------------------------------------------------------------
+
+void Bool::Print(std::ostream& os, Context&) {
+    os << (GetValue() ? runtime_string_consts::TRUE : runtime_string_consts::FALSE);
 }
 
 // ----------------------------------------------------------------------------
@@ -84,13 +128,17 @@ const Method* Class::GetMethod(const std::string& name) const {
     return (it == methods_.end()) ? ( (parent_) ? parent_->GetMethod(name) : nullptr ) : &(*it);
 }
 
+const Method* Class::GetMethod(const std::string& name, size_t args_count) const {
+    const Method* ptr_method = GetMethod(name);
+    return (ptr_method && (ptr_method->formal_params.size() == args_count)) ? ptr_method : nullptr;
+}
+
 [[nodiscard]] const std::string& Class::GetName() const {
     return name_;
 }
 
-void Class::Print(ostream& os, Context& context) {
-    (void)context;
-    os << "Class "sv << name_;
+void Class::Print(ostream& os, Context&) {
+    os << runtime_string_consts::CLASS << ' ' << name_;
 }
 
 // ----------------------------------------------------------------------------
@@ -100,11 +148,9 @@ ClassInstance::ClassInstance(const Class& cls)
 }
 
 void ClassInstance::Print(std::ostream& os, Context& context) {
-    if (HasMethod("__str__"s, 0)) {
-        const auto* ptr_method = GetMethod("__str__"s, 0);
-        Closure local_closure = CreateLocalClosure({}, {});
-        ObjectHolder oh = ptr_method->body.get()->Execute(local_closure, context);
-        os << oh.TryAs<String>()->GetValue();
+    if (const auto* ptr_method = TryMethod(runtime_string_consts::STR, 0)) {
+        ObjectHolder oh = Call(ptr_method, {}, context);
+        oh.Get()->Print(os, context);
     }
     else {
         os << this;
@@ -114,22 +160,29 @@ void ClassInstance::Print(std::ostream& os, Context& context) {
 ObjectHolder ClassInstance::Call(
     const std::string& method, const std::vector<ObjectHolder>& actual_args, Context& context) {
     const auto* ptr_method = GetMethod(method, actual_args.size());
-    Closure local_closure = CreateLocalClosure(ptr_method->formal_params, actual_args);
-    return ptr_method->body.get()->Execute(local_closure, context);
+    return Call(ptr_method, actual_args, context);
+}
+
+ObjectHolder ClassInstance::Call(const Method* method, const std::vector<ObjectHolder>& actual_args, Context& context) {
+    Closure local_closure = CreateLocalClosure(method->formal_params, actual_args);
+    return method->body.get()->Execute(local_closure, context);
 }
 
 bool ClassInstance::HasMethod(const std::string& method, size_t argument_count) const {
-    const auto* ptr_method = cls_.GetMethod(method);
-    return (ptr_method) ? (ptr_method->formal_params.size() == argument_count) : false;
+    return TryMethod(method, argument_count) != nullptr;
 }
 
 const Method* ClassInstance::GetMethod(const std::string& method, size_t argument_count) const {
-    if (!HasMethod(method, argument_count)) {
-        std::stringstream ss;
-        ss << "Unknown method name: "sv << method;
-        throw std::runtime_error(ss.str());
+    if (const auto* ptr_method = cls_.GetMethod(method, argument_count)) {
+        return ptr_method;
     }
-    return cls_.GetMethod(method);
+    std::stringstream ss;
+    ss << "Unknown method name: "sv << method;
+    throw std::runtime_error(ss.str());
+}
+
+const Method* ClassInstance::TryMethod(const std::string& method, size_t argument_count) const {
+    return cls_.GetMethod(method, argument_count);
 }
 
 Closure& ClassInstance::Fields() {
@@ -145,7 +198,7 @@ Closure ClassInstance::CreateLocalClosure(
     const std::vector<ObjectHolder>& actual_args) {
     assert(formal_params.size() == actual_args.size());
     Closure closure;
-    closure.emplace("self"s, ObjectHolder::Share(*this));
+    closure.emplace(runtime_string_consts::SELF, ObjectHolder::Share(*this));
     for (size_t i = 0; i < formal_params.size(); ++i) {
         closure.emplace(formal_params.at(i), actual_args.at(i));
     }
@@ -154,40 +207,35 @@ Closure ClassInstance::CreateLocalClosure(
 
 // ----------------------------------------------------------------------------
 
-Closure CreateCompareClosure(const ObjectHolder& lhs, const ObjectHolder& rhs, const std::string arg_name) {
-    Closure closure;
-    closure.emplace("self"s, lhs);
-    closure.emplace(arg_name, rhs);
-    return closure;
-}
-
 template <typename Compare>
 bool MakeComparison(
     const ObjectHolder& lhs, const ObjectHolder& rhs, Context& context,
     const std::string& func_name, Compare cmp) {
-    if (const auto* ptr_cls = lhs.TryAs<ClassInstance>()) {
-        if (const auto* prt_eq = ptr_cls->GetMethod(func_name, 1U)) {
-            Closure local_closure = CreateCompareClosure(lhs, rhs, prt_eq->formal_params.front());
-            return dynamic_cast<Bool*>(prt_eq->body.get()->Execute(local_closure, context).Get())->GetValue();
+    if (lhs && rhs) {
+        if (auto* ptr_cls = lhs.TryAs<ClassInstance>()) {
+            return IsTrue(ptr_cls->Call(func_name, { rhs }, context));
         }
-    }
 #define VALUED_OUTPUT(type) \
     if (lhs.IsType<type>() && rhs.IsType<type>()) return cmp(lhs.TryAs<type>()->GetValue(), rhs.TryAs<type>()->GetValue());
 
-    VALUED_OUTPUT(String);
-    VALUED_OUTPUT(Number);
-    VALUED_OUTPUT(Bool);
+        VALUED_OUTPUT(String);
+        VALUED_OUTPUT(Number);
+        VALUED_OUTPUT(Bool);
 
 #undef VALUED_OUTPUT
-    throw std::runtime_error("Cannot compare objects for equality"s);
+    }
+    throw std::runtime_error("Cannot compare objects for "s + func_name);
 }
 
 bool Equal(const ObjectHolder& lhs, const ObjectHolder& rhs, Context& context) {
-    return MakeComparison(lhs, rhs, context, "__eq__"s, std::equal_to{});
+    if (!lhs && !rhs) {
+        return true;
+    }
+    return MakeComparison(lhs, rhs, context, runtime_string_consts::EQ, std::equal_to{});
 }
 
 bool Less(const ObjectHolder& lhs, const ObjectHolder& rhs, Context& context) {
-    return MakeComparison(lhs, rhs, context, "__lt__"s, std::less{});
+    return MakeComparison(lhs, rhs, context, runtime_string_consts::LT, std::less{});
 }
 
 bool NotEqual(const ObjectHolder& lhs, const ObjectHolder& rhs, Context& context) {
@@ -195,15 +243,15 @@ bool NotEqual(const ObjectHolder& lhs, const ObjectHolder& rhs, Context& context
 }
 
 bool Greater(const ObjectHolder& lhs, const ObjectHolder& rhs, Context& context) {
-    return !Equal(lhs, rhs, context) && !Less(lhs, rhs, context);
+    return !Less(lhs, rhs, context) && !Equal(lhs, rhs, context);
 }
 
 bool LessOrEqual(const ObjectHolder& lhs, const ObjectHolder& rhs, Context& context) {
-    return Equal(lhs, rhs, context) || Less(lhs, rhs, context);
+    return !Greater(lhs, rhs, context);
 }
 
 bool GreaterOrEqual(const ObjectHolder& lhs, const ObjectHolder& rhs, Context& context) {
-    return Equal(lhs, rhs, context) || !Less(lhs, rhs, context);
+    return !Less(lhs, rhs, context);
 }
 
 // ----------------------------------------------------------------------------

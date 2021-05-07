@@ -148,11 +148,7 @@ public:
         : arg_(std::move(argument)) {
     }
 
-    const std::unique_ptr<Statement>& GetArg() const {
-        return arg_;
-    }
-
-private:
+protected:
     std::unique_ptr<Statement> arg_;
 };
 
@@ -175,15 +171,7 @@ public:
         , rhs_(std::move(rhs)) {
     }
 
-    const std::unique_ptr<Statement>& GetLhs() const {
-        return lhs_;
-    }
-
-    const std::unique_ptr<Statement>& GetRhs() const {
-        return rhs_;
-    }
-
-private:
+protected:
     std::unique_ptr<Statement> lhs_;
     std::unique_ptr<Statement> rhs_;
 };
